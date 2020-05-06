@@ -117,7 +117,7 @@ func (p *CertificateProvider) generateNewKey() error {
 	}
 
 	p.userKey = privateKey
-	return nil
+	return p.saveState()
 }
 
 func (p *CertificateProvider) GetCertificate(domain string) (*Certificate, error) {
