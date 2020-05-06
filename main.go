@@ -47,4 +47,17 @@ func main() {
 	}
 
 	getContainerEndpoints(cli)
+
+	cfg := utils.CertificateProviderConfig{
+		ConfigDir:     "./autocert",
+		Email:         "demo@example.com",
+		AuthPortHTTP:  5002,
+		AuthPortHTTPS: 5003,
+	}
+	cert, err := utils.CreateCertificateProvider(cfg)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("%+v\n", cert)
 }
