@@ -25,10 +25,10 @@ func CreateCertificateProvider(config CertificateProviderConfig) (*CertificatePr
 
 	// Create mssing directories
 	if _, err := os.Stat(config.ConfigDir); os.IsNotExist(err) {
-		os.MkdirAll(config.ConfigDir, 0600)
+		os.MkdirAll(config.ConfigDir, 0700)
 	}
 	if _, err := os.Stat(config.ConfigDir + "/cert"); os.IsNotExist(err) {
-		os.MkdirAll(config.ConfigDir+"/cert", 0600)
+		os.MkdirAll(config.ConfigDir+"/cert", 0700)
 	}
 
 	// Load state
@@ -57,10 +57,11 @@ func (p *CertificateProvider) loadState() error {
 	data, err := ioutil.ReadFile(stateFilePath)
 	if err != nil {
 		return fmt.Errorf("Could not read state file: %s", err.Error())
-	}
-	err = json.Unmarshal(data, &state)
-	if err != nil {
-		return fmt.Errorf("Could not parse state file: %s", err.Error())
+	} else {
+		err = json.Unmarshal(data, &state)
+		if err != nil {
+			return fmt.Errorf("Could not parse state file: %s", err.Error())
+		}
 	}
 
 	// If the persisted e-mail is different, bail early
