@@ -54,7 +54,12 @@ func main() {
 		AuthPortHTTP:  5002,
 		AuthPortHTTPS: 5003,
 	}
-	cert, err := utils.CreateCertificateProvider(cfg)
+	certPovider, err := utils.CreateCertificateProvider(cfg)
+	if err != nil {
+		panic(err)
+	}
+
+	cert, err := certPovider.GetCertificate("example.me")
 	if err != nil {
 		panic(err)
 	}

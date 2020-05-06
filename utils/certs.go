@@ -47,21 +47,17 @@ func (p *CertificateProvider) loadState() error {
 
 	// If we are missing persistence, generate new key
 	if _, err := os.Stat(stateFilePath); os.IsNotExist(err) {
-		err := p.generateNewKey()
-		if err != nil {
-			return err
-		}
+		return p.generateNewKey()
 	}
 
 	// Load state from persistence
 	data, err := ioutil.ReadFile(stateFilePath)
 	if err != nil {
 		return fmt.Errorf("Could not read state file: %s", err.Error())
-	} else {
-		err = json.Unmarshal(data, &state)
-		if err != nil {
-			return fmt.Errorf("Could not parse state file: %s", err.Error())
-		}
+	}
+	err = json.Unmarshal(data, &state)
+	if err != nil {
+		return fmt.Errorf("Could not parse state file: %s", err.Error())
 	}
 
 	// If the persisted e-mail is different, bail early
