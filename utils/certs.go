@@ -15,9 +15,9 @@ import (
 )
 
 type persistenceFile struct {
-	privateKey   string                 `json:"private_key"`
-	email        string                 `json:"email"`
-	registration *registration.Resource `json:"registration,omitempty"`
+	PrivateKey   string                 `json:"private_key"`
+	Email        string                 `json:"email"`
+	Registration *registration.Resource `json:"registration,omitempty"`
 }
 
 func CreateCertificateProvider(config CertificateProviderConfig) (*CertificateProvider, error) {
@@ -61,13 +61,13 @@ func (p *CertificateProvider) loadState() error {
 	}
 
 	// If the persisted e-mail is different, bail early
-	if state.email != p.config.Email {
+	if state.Email != p.config.Email {
 		return fmt.Errorf("The persisted e-mail (%s) is different than the one given (%s)",
-			state.email, p.config.Email)
+			state.Email, p.config.Email)
 	}
 
 	// Load the private key from the file
-	data, err = base64.StdEncoding.DecodeString(state.privateKey)
+	data, err = base64.StdEncoding.DecodeString(state.PrivateKey)
 	if err != nil {
 		return fmt.Errorf("Could not load private key: %s", err.Error())
 	}
@@ -77,7 +77,7 @@ func (p *CertificateProvider) loadState() error {
 	}
 
 	p.userKey = key
-	p.userRegistration = state.registration
+	p.userRegistration = state.Registration
 
 	return nil
 }
@@ -88,15 +88,15 @@ func (p *CertificateProvider) saveState() error {
 		state         persistenceFile
 	)
 
-	state.email = p.config.Email
-	state.registration = p.userRegistration
+	state.Email = p.config.Email
+	state.Registration = p.userRegistration
 
 	pKey, err := x509.MarshalECPrivateKey(p.userKey.(*ecdsa.PrivateKey))
 	if err != nil {
 		return fmt.Errorf("Could not marshal private key: %s", err.Error())
 	}
 
-	state.privateKey = base64.StdEncoding.EncodeToString(pKey)
+	state.PrivateKey = base64.StdEncoding.EncodeToString(pKey)
 
 	bt, err := json.Marshal(state)
 	if err != nil {
