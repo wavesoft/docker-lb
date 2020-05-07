@@ -140,6 +140,7 @@ func (h *HAProxyManager) writeConfig() error {
 func (h *HAProxyManager) createConfig() ([]byte, error) {
   var (
     sslCerts string = ""
+    useSSL   bool   = false
   )
 
   // Configure front-ends
@@ -172,6 +173,7 @@ func (h *HAProxyManager) createConfig() ([]byte, error) {
           return nil, err
         }
         sslCerts += " crt " + certPath
+        useSSL = true
       }
     }
     if e.FrontendPath != "/" {
@@ -240,13 +242,10 @@ func (h *HAProxyManager) createConfig() ([]byte, error) {
     frontend https-in
         mode http
         bind 0.0.0.0:443 ssl %s
-        default_backend be_challenge_https
-        acl url_challenge path_beg /.well-known/acme-challenge
   `, sslCerts)) + httpsFrontend
 
   // Add the default challenge backend routing
   httpFrontend += "  use_backend be_challenge_http if url_challenge"
-  httpsFrontend += "  use_backend be_challenge_https if url_challenge"
 
   // Setup back-ends
   var backends = ""
@@ -298,7 +297,10 @@ func (h *HAProxyManager) createConfig() ([]byte, error) {
   `, h.certManager.config.AuthPortHTTP, h.certManager.config.AuthPortHTTPS))
 
   // Compose config
-  contents := globals + "\n" + httpFrontend + "\n" + httpsFrontend + "\n"
+  contents := globals + "\n" + httpFrontend + "\n"
+  if useSSL {
+    contents += httpsFrontend + "\n"
+  }
   contents += backends
 
   log.Infof("Using config: %s", contents)

@@ -57,11 +57,11 @@ func (p *CertificateProvider) getCertificateLetsEncrypt(domain string) (*Certifi
   if err != nil {
     return nil, fmt.Errorf("Could not start HTTP server: %s", err.Error())
   }
-  err = client.Challenge.SetTLSALPN01Provider(
-    tlsalpn01.NewProviderServer("", fmt.Sprintf("%d", p.config.AuthPortHTTPS)))
-  if err != nil {
-    return nil, fmt.Errorf("Could not start HTTPS server: %s", err.Error())
-  }
+  // err = client.Challenge.SetTLSALPN01Provider(
+  //   tlsalpn01.NewProviderServer("", fmt.Sprintf("%d", p.config.AuthPortHTTPS)))
+  // if err != nil {
+  //   return nil, fmt.Errorf("Could not start HTTPS server: %s", err.Error())
+  // }
 
   // New users will need to register
   if p.userRegistration == nil {
