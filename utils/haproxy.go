@@ -44,7 +44,7 @@ func (h *HAProxyManager) Start() error {
 
   err := h.writeConfig()
   if err != nil {
-    return fmt.Errorf("Could not re-generate config")
+    return fmt.Errorf("Could not re-generate config: %s", err.Error())
   }
 
   log.Infof("Starting HAProxy")

@@ -4,6 +4,7 @@ import (
   "crypto/ecdsa"
   "crypto/elliptic"
   "crypto/rand"
+  "crypto/rsa"
   "crypto/x509"
   "crypto/x509/pkix"
   "encoding/base64"
@@ -131,7 +132,7 @@ func (p *CertificateProvider) GetDefault(domain string) (string, error) {
 
   // Crate if missing
   if _, err := os.Stat(certFilePath); os.IsNotExist(err) {
-    priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+    priv, err := rsa.GenerateKey(rand.Reader, 2048)
     if err != nil {
       return "", fmt.Errorf("Could not generate private key: %s", err.Error())
     }
@@ -158,8 +159,8 @@ func (p *CertificateProvider) GetDefault(domain string) (string, error) {
       BasicConstraintsValid: true,
     }
 
-    template.DNSNames = append(template.DNSNames, domain)
-    derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, priv.PublicKey, priv)
+    // fmt.Printf("%+v (%s)\n", priv, reflect.TypeOf(priv))
+    derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
     if err != nil {
       return "", fmt.Errorf("Failed to create certificate: %s", err.Error())
     }
