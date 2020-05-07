@@ -1,68 +1,79 @@
 package main
 
 import (
-	"context"
-	"fmt"
+  "time"
 
-	"github.com/wavesoft/docker-lb/utils"
-
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/client"
+  log "github.com/sirupsen/logrus"
+  "github.com/wavesoft/docker-lb/utils"
 )
 
-type ContainerEndpoints struct {
-	Hostname string
-	IP       string
-	Port     string
-}
+func syncThread(docker *utils.DockerMonitor, haproxy *utils.HAProxyManager) {
+  var (
+    crc  uint64 = 0
+    ncrc uint64 = 0
+  )
 
-func getContainerEndpoints(cli *client.Client) ([]ContainerEndpoints, error) {
-	containers, err := cli.ContainerList(context.Background(), types.ContainerListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("Could not enumerate containers: %s", err.Error())
-	}
+  for {
+    eps, err := docker.GetProxyEndpoints()
+    if err != nil {
+      log.Errorf("Could not get docker status: %s", err.Error())
+    } else {
+      ncrc = 0
+      for _, ep := range eps {
+        ncrc ^= ep.Hash()
+        log.Infof("ep hash=%08x -> %08x", ep.Hash(), ncrc)
+      }
 
-	for _, container := range containers {
-		fmt.Printf("%s %s\n", container.ID[:10], container.Image)
-		for k, v := range container.Labels {
-			fmt.Printf(" k=%s, v=%v\n", k, v)
-		}
-		if domain, ok := container.Labels["expose.domain"]; ok {
-			fmt.Printf("Expose %s: %s\n", container.ID, domain)
-			if container.NetworkSettings != nil {
-				for netName, netInfo := range container.NetworkSettings.Networks {
-					fmt.Printf("> net=%s, ep=%s, gw=%s\n", netName, netInfo.IPAddress, netInfo.Gateway)
-				}
-			}
-		}
-	}
+      // Detect changes
+      if ncrc != crc {
+        crc = ncrc
+        log.Infof("Endpoint configuration changed")
+        err = haproxy.SetConfig(&utils.HAProxyConfig{
+          eps,
+        })
 
-	return nil, nil
+        if err != nil {
+          log.Errorf("Could not apply configuration: %s", err.Error())
+        }
+      }
+    }
+
+    time.Sleep(30 * time.Second)
+  }
 }
 
 func main() {
-	cli, err := client.NewEnvClient()
-	if err != nil {
-		panic(err)
-	}
+  docker, err := utils.CreateDockerMonitor()
+  if err != nil {
+    panic(err)
+  }
 
-	getContainerEndpoints(cli)
+  cfg := utils.CertificateProviderConfig{
+    ConfigDir:     "./autocert",
+    Email:         "demo@example.com",
+    AuthPortHTTP:  5002,
+    AuthPortHTTPS: 5003,
+  }
+  certPovider, err := utils.CreateCertificateProvider(cfg)
+  if err != nil {
+    panic(err)
+  }
 
-	cfg := utils.CertificateProviderConfig{
-		ConfigDir:     "./autocert",
-		Email:         "demo@example.com",
-		AuthPortHTTP:  5002,
-		AuthPortHTTPS: 5003,
-	}
-	certPovider, err := utils.CreateCertificateProvider(cfg)
-	if err != nil {
-		panic(err)
-	}
+  // cert, err := certPovider.GetCertificate("example.me")
+  // if err != nil {
+  //  panic(err)
+  // }
+  // fmt.Printf("%+v\n", cert)
 
-	cert, err := certPovider.GetCertificate("example.me")
-	if err != nil {
-		panic(err)
-	}
+  proxy := utils.CreateHAProxyManager("/usr/local/sbin/haproxy", certPovider)
+  err = proxy.Start()
+  if err != nil {
+    panic(err)
+  }
 
-	fmt.Printf("%+v\n", cert)
+  // Start monitor thread
+  go syncThread(docker, proxy)
+
+  // Wait forever
+  select {}
 }
