@@ -5,11 +5,15 @@ import (
   "crypto/elliptic"
   "crypto/rand"
   "crypto/x509"
+  "crypto/x509/pkix"
   "encoding/base64"
   "encoding/json"
+  "encoding/pem"
   "fmt"
   "io/ioutil"
+  "math/big"
   "os"
+  "time"
 
   "github.com/go-acme/lego/v3/registration"
 )
@@ -118,6 +122,72 @@ func (p *CertificateProvider) generateNewKey() error {
 
   p.userKey = privateKey
   return p.saveState()
+}
+
+func (p *CertificateProvider) GetDefault(domain string) (string, error) {
+  var (
+    certFilePath string = fmt.Sprintf("%s/cert/default.pem", p.config.ConfigDir)
+  )
+
+  // Crate if missing
+  if _, err := os.Stat(certFilePath); os.IsNotExist(err) {
+    priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+    if err != nil {
+      return "", fmt.Errorf("Could not generate private key: %s", err.Error())
+    }
+
+    validFor := 365 * 24 * time.Hour
+    notBefore := time.Now()
+    notAfter := notBefore.Add(validFor)
+
+    serialNumberLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+    serialNumber, err := rand.Int(rand.Reader, serialNumberLimit)
+    if err != nil {
+      return "", fmt.Errorf("Failed to generate serial number: %s", err.Error())
+    }
+
+    template := x509.Certificate{
+      SerialNumber: serialNumber,
+      Subject: pkix.Name{
+        Organization: []string{"Acme Co"},
+      },
+      NotBefore:             notBefore,
+      NotAfter:              notAfter,
+      KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+      ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+      BasicConstraintsValid: true,
+    }
+
+    template.DNSNames = append(template.DNSNames, domain)
+    derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, priv.PublicKey, priv)
+    if err != nil {
+      return "", fmt.Errorf("Failed to create certificate: %s", err.Error())
+    }
+
+    certOut, err := os.OpenFile(certFilePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+    if err != nil {
+      return "", fmt.Errorf("Failed to create %s: %s", certFilePath, err.Error())
+    }
+
+    if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+      return "", fmt.Errorf("Failed to write %s: %s", certFilePath, err.Error())
+    }
+
+    privBytes, err := x509.MarshalPKCS8PrivateKey(priv)
+    if err != nil {
+      return "", fmt.Errorf("Unable to marshal private key: %v", err)
+    }
+
+    if err := pem.Encode(certOut, &pem.Block{Type: "PRIVATE KEY", Bytes: privBytes}); err != nil {
+      return "", fmt.Errorf("Failed to write %s: %s", certFilePath, err.Error())
+    }
+
+    if err := certOut.Close(); err != nil {
+      return "", fmt.Errorf("Error closing %s: %s", certFilePath, err.Error())
+    }
+  }
+
+  return certFilePath, nil
 }
 
 func (p *CertificateProvider) GetCertificateForDomain(domain string) (string, error) {

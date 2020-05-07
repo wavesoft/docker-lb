@@ -171,7 +171,7 @@ func (h *HAProxyManager) createConfig() ([]byte, error) {
         if err != nil {
           return nil, err
         }
-        sslCerts += " ssl " + certPath
+        sslCerts += " crt " + certPath
       }
     }
     if e.FrontendPath != "/" {
@@ -225,9 +225,20 @@ func (h *HAProxyManager) createConfig() ([]byte, error) {
     }
   }
 
+  // If we don't have SSL certs, create a self-signed to use for
+  // temporary purposes
+  if sslCerts == "" {
+    certFile, err := h.certManager.GetDefault("")
+    if err != nil {
+      return nil, fmt.Errorf("Could not generate self-signed server cert: %s", err.Error())
+    }
+    sslCerts += " crt " + certFile
+  }
+
   // Define HTTPS frontend
   httpsFrontend = dedent.Dedent(fmt.Sprintf(`
     frontend https-in
+        mode http
         bind 0.0.0.0:443 ssl %s
         default_backend be_challenge_https
         acl url_challenge path_beg /.well-known/acme-challenge
