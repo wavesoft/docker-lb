@@ -21,7 +21,6 @@ func syncThread(docker *utils.DockerMonitor, haproxy *utils.HAProxyManager) {
       ncrc = 0
       for _, ep := range eps {
         ncrc ^= ep.Hash()
-        log.Infof("ep hash=%08x -> %08x", ep.Hash(), ncrc)
       }
 
       // Detect changes

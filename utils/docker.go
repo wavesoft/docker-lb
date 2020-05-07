@@ -56,13 +56,16 @@ func (m *DockerMonitor) GetProxyEndpoints() ([]ProxyEndpoint, error) {
 				pathFrom = sv
 				pathTo = sv
 			}
-			if sv, ok := container.Labels["publish.path.to"]; ok {
+			if sv, ok := container.Labels["publish.path.frontend"]; ok {
+				pathFrom = sv
+			}
+			if sv, ok := container.Labels["publish.path.backend"]; ok {
 				pathTo = sv
 			}
 
 			// Get autocert flag
 			autoCert := false
-			if sv, ok := container.Labels["autocert"]; ok {
+			if sv, ok := container.Labels["publish.ssl"]; ok {
 				if sv == "yes" || sv == "true" || sv == "on" || sv == "1" {
 					autoCert = true
 				}

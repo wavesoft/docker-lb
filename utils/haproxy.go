@@ -149,6 +149,7 @@ func (h *HAProxyManager) createConfig() ([]byte, error) {
     frontend http-in
       mode http
       bind 0.0.0.0:80
+      acl url_challenge path_beg /.well-known/acme-challenge
   `)
 
   // Define host & path ACLs
@@ -230,28 +231,39 @@ func (h *HAProxyManager) createConfig() ([]byte, error) {
   httpsFrontend = dedent.Dedent(fmt.Sprintf(`
     frontend https-in
         bind 0.0.0.0:443 ssl %s
+        acl url_challenge path_beg /.well-known/acme-challenge
   `, sslCerts)) + httpsFrontend
+
+  // Add the default challenge backend routing
+  httpFrontend += "  use_backend be_challenge_http if url_challenge"
+  httpsFrontend += "  use_backend be_challenge_https if url_challenge"
 
   // Setup back-ends
   var backends = ""
   for num, e := range h.config.Endpoints {
+    rewrite := ""
+    if e.FrontendPath != e.BackendPath {
+      rewrite = fmt.Sprintf(
+        `  reqrep ^([^\ :]*)\ %s/(.*)     \1\ %s\2`,
+        e.FrontendPath, e.BackendPath,
+      )
+    }
+
     backends += dedent.Dedent(fmt.Sprintf(`
       backend be%d
         mode http
         option httpclose
         option forwardfor
         server node1 %s:%d
-
       `,
       num, e.BackendIP, e.BackendPort,
-    ))
+    )) + rewrite + "\n"
   }
 
   // Configure globals
   var globals = dedent.Dedent(fmt.Sprintf(`
     global
       log stdout local0 info
-      master-worker
       maxconn 4096
 
     defaults
@@ -265,6 +277,14 @@ func (h *HAProxyManager) createConfig() ([]byte, error) {
       stats   enable
       stats   auth  admin:admin
       stats   uri   /haproxyStats
+
+    backend be_challenge_http
+      mode http
+      server node1 127.0.0.1:5002
+
+    backend be_challenge_https
+      mode http
+      server node1 127.0.0.1:5003
   `))
 
   // Compose config
