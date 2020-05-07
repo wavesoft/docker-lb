@@ -47,9 +47,19 @@ func main() {
     panic(err)
   }
 
+  sslEmail := os.Getenv("SSL_EMAIL")
+  if sslEmail == "" {
+    sslEmail = "demo@example.com"
+  }
+
+  certDir := os.Getenv("CERT_DIR")
+  if certDir == "" {
+    certDir = "autocert"
+  }
+
   cfg := utils.CertificateProviderConfig{
-    ConfigDir:     "./autocert",
-    Email:         "demo@example.com",
+    ConfigDir:     certDir,
+    Email:         sslEmail,
     AuthPortHTTP:  5002,
     AuthPortHTTPS: 5003,
   }

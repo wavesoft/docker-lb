@@ -7,7 +7,6 @@ import (
   "github.com/go-acme/lego/v3/certcrypto"
   "github.com/go-acme/lego/v3/certificate"
   "github.com/go-acme/lego/v3/challenge/http01"
-  "github.com/go-acme/lego/v3/challenge/tlsalpn01"
   "github.com/go-acme/lego/v3/lego"
   "github.com/go-acme/lego/v3/registration"
 )
@@ -38,8 +37,8 @@ func (p *CertificateProvider) getCertificateLetsEncrypt(domain string) (*Certifi
   config := lego.NewConfig(&myUser)
 
   // This CA URL is configured for a local dev instance of Boulder running in Docker in a VM.
-  config.CADirURL = "https://acme-staging-v02.api.letsencrypt.org/directory"
-  // config.CADirURL = "https://acme-v02.api.letsencrypt.org/directory"
+  // config.CADirURL = "https://acme-staging-v02.api.letsencrypt.org/directory"
+  config.CADirURL = "https://acme-v02.api.letsencrypt.org/directory"
   config.Certificate.KeyType = certcrypto.RSA2048
 
   // A client facilitates communication with the CA server.
@@ -57,11 +56,6 @@ func (p *CertificateProvider) getCertificateLetsEncrypt(domain string) (*Certifi
   if err != nil {
     return nil, fmt.Errorf("Could not start HTTP server: %s", err.Error())
   }
-  // err = client.Challenge.SetTLSALPN01Provider(
-  //   tlsalpn01.NewProviderServer("", fmt.Sprintf("%d", p.config.AuthPortHTTPS)))
-  // if err != nil {
-  //   return nil, fmt.Errorf("Could not start HTTPS server: %s", err.Error())
-  // }
 
   // New users will need to register
   if p.userRegistration == nil {
