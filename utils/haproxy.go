@@ -113,12 +113,6 @@ func (h *HAProxyManager) Reload() error {
     return err
   }
 
-  // log.Infof("Reloading HAProxy Configuration")
-  // err = h.proc.Process.Signal(syscall.SIGUSR1)
-  // if err != nil {
-  //   return fmt.Errorf("Could not signal process: %s", err.Error())
-  // }
-
   return nil
 }
 
@@ -200,16 +194,10 @@ func (h *HAProxyManager) createConfig() ([]byte, error) {
       }
     }
     if e.FrontendPath != "/" {
-      if httpUse != "" {
-        httpUse += " and "
-      }
-      httpUse += fmt.Sprintf("url_fe%d", num)
+      httpUse += fmt.Sprintf(" url_fe%d", num)
 
       if e.SSLAutoCert {
-        if httpsUse != "" {
-          httpsUse += " and "
-        }
-        httpsUse += fmt.Sprintf("url_fe%d", num)
+        httpsUse += fmt.Sprintf(" url_fe%d", num)
       }
     }
 
@@ -253,7 +241,7 @@ func (h *HAProxyManager) createConfig() ([]byte, error) {
     rewrite := ""
     if e.FrontendPath != e.BackendPath {
       rewrite = fmt.Sprintf(
-        `  reqrep ^([^\ :]*)\ %s/(.*)     \1\ %s\2`,
+        `  http-request replace-path %s(.*) %s\1`,
         e.FrontendPath, e.BackendPath,
       )
     }
@@ -274,6 +262,7 @@ func (h *HAProxyManager) createConfig() ([]byte, error) {
     global
       log stdout local0 info
       maxconn 4096
+      stats socket /var/run/haproxy.sock mode 600 expose-fd listeners level user
 
     defaults
       log     global

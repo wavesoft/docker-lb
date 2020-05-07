@@ -48,14 +48,14 @@ func main() {
     panic(err)
   }
 
-  sslEmail := os.Getenv("SSL_EMAIL")
+  sslEmail := os.Getenv("AUTOCERT_EMAIL")
   if sslEmail == "" {
     sslEmail = "demo@example.com"
   }
 
-  certDir := os.Getenv("CERT_DIR")
+  certDir := os.Getenv("AUTOCERT_DIR")
   if certDir == "" {
-    certDir = "autocert"
+    certDir = "/var/lib/docker-lb"
   }
 
   cfg := utils.CertificateProviderConfig{
@@ -68,12 +68,6 @@ func main() {
   if err != nil {
     panic(err)
   }
-
-  // cert, err := certPovider.GetCertificate("example.me")
-  // if err != nil {
-  //  panic(err)
-  // }
-  // fmt.Printf("%+v\n", cert)
 
   proxy := utils.CreateHAProxyManager("/usr/local/sbin/haproxy", certPovider)
   err = proxy.Start()
