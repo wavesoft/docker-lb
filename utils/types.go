@@ -1,24 +1,13 @@
 package utils
 
 import (
-  "crypto"
-  "os/exec"
-
   "github.com/docker/docker/client"
-  "github.com/go-acme/lego/v3/registration"
 )
 
-type CertificateProviderConfig struct {
-  ConfigDir     string
-  Email         string
-  AuthPortHTTP  int
-  AuthPortHTTPS int
-}
-
-type CertificateProvider struct {
-  config           CertificateProviderConfig
-  userKey          crypto.PrivateKey
-  userRegistration *registration.Resource
+type CertificateProvider interface {
+  GetSelfSigned(domain string) (string, error)
+  GetCertificateForDomain(domain string) (string, error)
+  GetAuthServicePort(ssl bool) int
 }
 
 type Certificate struct {
@@ -42,14 +31,6 @@ type ProxyEndpoint struct {
 
 type HAProxyConfig struct {
   Endpoints []ProxyEndpoint
-}
-
-type HAProxyManager struct {
-  config      *HAProxyConfig
-  certManager *CertificateProvider
-  binPath     string
-  cfgPath     string
-  proc        *exec.Cmd
 }
 
 type DockerMonitor struct {

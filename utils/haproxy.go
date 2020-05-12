@@ -6,15 +6,24 @@ import (
   "io/ioutil"
   "os"
   "os/exec"
+  "strconv"
   "strings"
   "syscall"
   "time"
 
-  "github.com/lithammer/dedent"
+  // "github.com/lithammer/dedent"
   log "github.com/sirupsen/logrus"
 )
 
-func CreateHAProxyManager(binPath string, certManager *CertificateProvider) *HAProxyManager {
+type HAProxyManager struct {
+  config      *HAProxyConfig
+  certManager CertificateProvider
+  binPath     string
+  cfgPath     string
+  proc        *exec.Cmd
+}
+
+func CreateHAProxyManager(binPath string, certManager CertificateProvider) *HAProxyManager {
   return &HAProxyManager{
     config:      &HAProxyConfig{},
     certManager: certManager,
@@ -101,7 +110,7 @@ func (h *HAProxyManager) Reload() error {
 
   err := h.writeConfig()
   if err != nil {
-    return fmt.Errorf("Could not re-generate config")
+    return fmt.Errorf("Could not re-generate config: %s", err.Error())
   }
 
   err = h.Stop()
@@ -122,7 +131,7 @@ func (h *HAProxyManager) SetConfig(cfg *HAProxyConfig) error {
 }
 
 func (h *HAProxyManager) writeConfig() error {
-  contents, err := h.createConfig()
+  contents, err := h.computeConfig()
   if err != nil {
     return err
   }
@@ -131,168 +140,272 @@ func (h *HAProxyManager) writeConfig() error {
   return ioutil.WriteFile(h.cfgPath, contents, 0600)
 }
 
-func (h *HAProxyManager) createConfig() ([]byte, error) {
+type HAPBackendRecord struct {
+  Index int
+  Port  int
+  Host  string
+
+  // Needed for URL rewriting
+  PathBe string
+  PathFe string
+}
+
+type HAPMappingRecord struct {
+  Index   int
+  Path    string
+  Backend *HAPBackendRecord
+}
+
+type HAPFrontendRecord struct {
+  Index   int
+  Domain  string
+  SSL     bool
+  Mapping []*HAPMappingRecord
+}
+
+func normalizePath(p string) string {
+  // Black paths map always to root path
+  if p == "" || p == "/" {
+    return "/"
+  }
+  // Paths must always start with leading slash
+  if p[0] != '/' {
+    p = "/" + p
+  }
+  return p
+}
+
+func getBackend(list *[]*HAPBackendRecord, ep *ProxyEndpoint) *HAPBackendRecord {
+  for _, r := range *list {
+    if r.Host == ep.BackendIP && r.Port == ep.BackendPort &&
+      r.PathBe == normalizePath(ep.BackendPath) &&
+      r.PathFe == normalizePath(ep.FrontendPath) {
+      return r
+    }
+  }
+
+  rec := &HAPBackendRecord{
+    Index:  len(*list) + 1,
+    Host:   ep.BackendIP,
+    Port:   ep.BackendPort,
+    PathBe: normalizePath(ep.BackendPath),
+    PathFe: normalizePath(ep.FrontendPath),
+  }
+  *list = append(*list, rec)
+  return rec
+}
+
+func getFrontend(list *[]*HAPFrontendRecord, ep *ProxyEndpoint, ssl bool) *HAPFrontendRecord {
+  for _, r := range *list {
+    if r.Domain == ep.FrontendDomain && r.SSL == ssl {
+      return r
+    }
+  }
+
+  rec := &HAPFrontendRecord{
+    Index:   len(*list) + 1,
+    Domain:  ep.FrontendDomain,
+    SSL:     ssl,
+    Mapping: nil,
+  }
+  *list = append(*list, rec)
+  return rec
+}
+
+func (f *HAPFrontendRecord) addMapping(path string, be *HAPBackendRecord) {
+  f.Mapping = append(f.Mapping, &HAPMappingRecord{
+    Index:   len(f.Mapping) + 1,
+    Path:    normalizePath(path),
+    Backend: be,
+  })
+}
+
+func (h *HAProxyManager) computeConfig() ([]byte, error) {
   var (
-    sslCerts string = ""
-    useSSL   bool   = false
+    backends  []*HAPBackendRecord  = nil
+    frontends []*HAPFrontendRecord = nil
+    feCerts   []string
+    feHttp    []string
+    feHttps   []string
+    feBeHttp  []string
+    feBeHttps []string
+    beAll     []string
   )
 
-  // Configure front-ends
-  var httpsFrontend = ""
-  var httpFrontend = dedent.Dedent(`
-    frontend http-in
-      mode http
-      bind 0.0.0.0:80
-      acl url_challenge path_beg /.well-known/acme-challenge
-  `)
+  // Create the mapping tables
+  for _, e := range h.config.Endpoints {
+    be := getBackend(&backends, &e)
 
-  // Define host & path ACLs
-  for num, e := range h.config.Endpoints {
-    if e.FrontendDomain != "" {
-      if strings.Contains(e.FrontendDomain, ":") {
-        httpFrontend += fmt.Sprintf(
-          "  acl host_fe%d hdr(host) -i %s\n",
-          num, e.FrontendDomain,
+    // Add the non-SSL front-end
+    fe := getFrontend(&frontends, &e, false)
+    fe.addMapping(e.FrontendPath, be)
+
+    // If this is an SSL-enabled endpoint, add the SSL frontend
+    if e.SSLAutoCert {
+      fe := getFrontend(&frontends, &e, true)
+      fe.addMapping(e.FrontendPath, be)
+    }
+  }
+
+  // Initial configuration for http backend that implements the
+  // HTTP-01 challenge
+  feHttp = append(feHttp,
+    "frontend http-in",
+    "  mode http",
+    "  bind 0.0.0.0:80",
+    "  acl url_challenge path_beg /.well-known/acme-challenge",
+  )
+  feBeHttp = append(feBeHttp,
+    "  use_backend be_challenge_http if url_challenge",
+  )
+
+  // Initial configuration for https backend
+  feHttps = append(feHttps,
+    "frontend https-in",
+    "  mode http",
+  )
+  for _, fe := range frontends {
+    if fe.SSL {
+      certPath, err := h.certManager.GetCertificateForDomain(fe.Domain)
+      if err != nil {
+        return nil, err
+      }
+      feCerts = append(feCerts, fmt.Sprintf("crt %s", certPath))
+    }
+  }
+
+  // Make sure we have a self-signed fallback certificates if there are no
+  // certificates defined
+  if len(feCerts) == 0 {
+    certPath, err := h.certManager.GetSelfSigned("")
+    if err != nil {
+      return nil, err
+    }
+    feCerts = append(feCerts, fmt.Sprintf("crt %s", certPath))
+  }
+
+  feHttps = append(feHttps,
+    "  mode http",
+    "  bind 0.0.0.0:443 ssl "+strings.Join(feCerts, " "),
+  )
+
+  // Process frontend records
+  for fi, fe := range frontends {
+    var (
+      aclCommon  []string
+      targetAcls *[]string
+      targetBEs  *[]string
+    )
+
+    // Pick target where to add this rule
+    if fe.SSL {
+      targetAcls = &feHttps
+      targetBEs = &feBeHttps
+    } else {
+      targetAcls = &feHttp
+      targetBEs = &feBeHttp
+    }
+
+    // Add domain-specific routing
+    if fe.Domain != "" {
+      aclName := fmt.Sprintf("host_fe%d", fi)
+      aclCommon = append(aclCommon, aclName)
+
+      *targetAcls = append(*targetAcls,
+        fmt.Sprintf("  acl %s req.hdr(Host),regsub(:[0-9]+$,) -i %s", aclName, fe.Domain),
+      )
+    }
+
+    // Process backend maps
+    for mi, m := range fe.Mapping {
+      aclList := make([]string, len(aclCommon))
+      copy(aclList, aclCommon)
+
+      // Add path-specific acl
+      if m.Path != "/" {
+        aclName := fmt.Sprintf("host_fe%d_url%d", fi, mi)
+        aclList = append(aclList, aclName)
+
+        *targetAcls = append(*targetAcls,
+          fmt.Sprintf("  acl %s path_beg %s", aclName, m.Path),
+        )
+      }
+
+      // Create the backend record to append after we are done with the ALCs
+      if len(aclList) > 0 {
+        *targetBEs = append(*targetBEs,
+          fmt.Sprintf("  use_backend be%d if %s", m.Backend.Index, strings.Join(aclList, " ")),
         )
       } else {
-        httpFrontend += fmt.Sprintf(
-          "  acl host_fe%d req.hdr(Host),regsub(:[0-9]+$,) -i %s\n",
-          num, e.FrontendDomain,
+        *targetBEs = append(*targetBEs,
+          fmt.Sprintf("  use_backend be%d", m.Backend.Index),
         )
       }
-
-      if e.SSLAutoCert {
-        certPath, err := h.certManager.GetCertificateForDomain(e.FrontendDomain)
-        if err != nil {
-          return nil, err
-        }
-        sslCerts += " crt " + certPath
-        useSSL = true
-      }
-    }
-    if e.FrontendPath != "/" {
-      httpFrontend += fmt.Sprintf(
-        "  acl url_fe%d path_beg %s\n",
-        num, e.FrontendPath,
-      )
-      httpsFrontend += fmt.Sprintf(
-        "  acl url_fe%d path_beg %s\n",
-        num, e.FrontendPath,
-      )
     }
   }
 
-  // Define usage instructions
-  for num, e := range h.config.Endpoints {
-    httpUse := ""
-    httpsUse := ""
+  // Process backend records
+  for _, be := range backends {
+    beAll = append(beAll,
+      fmt.Sprintf("backend be%d", be.Index),
+      "  mode http",
+      "  option httpclose",
+      "  option forwardfor",
+      fmt.Sprintf("  server node1 %s:%d", be.Host, be.Port),
+    )
 
-    if e.FrontendDomain != "" {
-      httpUse += fmt.Sprintf("host_fe%d", num)
-      if e.SSLAutoCert {
-        httpsUse += fmt.Sprintf("{ ssl_fc_sni %s }", e.FrontendDomain)
-      }
-    }
-    if e.FrontendPath != "/" {
-      httpUse += fmt.Sprintf(" url_fe%d", num)
-
-      if e.SSLAutoCert {
-        httpsUse += fmt.Sprintf(" url_fe%d", num)
-      }
-    }
-
-    if httpUse != "" {
-      httpFrontend += fmt.Sprintf(
-        "  use_backend be%d if %s\n",
-        num, httpUse,
-      )
-    }
-    if httpsUse != "" {
-      httpsFrontend += fmt.Sprintf(
-        "  use_backend be%d if %s\n",
-        num, httpsUse,
-      )
-    }
-  }
-
-  // If we don't have SSL certs, create a self-signed to use for
-  // temporary purposes
-  if sslCerts == "" {
-    certFile, err := h.certManager.GetDefault("")
-    if err != nil {
-      return nil, fmt.Errorf("Could not generate self-signed server cert: %s", err.Error())
-    }
-    sslCerts += " crt " + certFile
-  }
-
-  // Define HTTPS frontend
-  httpsFrontend = dedent.Dedent(fmt.Sprintf(`
-    frontend https-in
-        mode http
-        bind 0.0.0.0:443 ssl %s
-  `, sslCerts)) + httpsFrontend
-
-  // Add the default challenge backend routing
-  httpFrontend += "  use_backend be_challenge_http if url_challenge"
-
-  // Setup back-ends
-  var backends = ""
-  for num, e := range h.config.Endpoints {
-    rewrite := ""
-    if e.FrontendPath != e.BackendPath {
-      rewrite = fmt.Sprintf(
-        `  http-request replace-path %s(.*) %s\1`,
-        e.FrontendPath, e.BackendPath,
+    // Add rewrite rule if paths mismatch
+    if be.PathFe != be.PathBe {
+      beAll = append(beAll,
+        fmt.Sprintf(`  http-request replace-path %s(.*) %s\1`, be.PathFe, be.PathBe),
       )
     }
 
-    backends += dedent.Dedent(fmt.Sprintf(`
-      backend be%d
-        mode http
-        option httpclose
-        option forwardfor
-        server node1 %s:%d
-      `,
-      num, e.BackendIP, e.BackendPort,
-    )) + rewrite + "\n"
+    beAll = append(beAll, "")
   }
 
-  // Configure globals
-  var globals = dedent.Dedent(fmt.Sprintf(`
-    global
-      log stdout local0 info
-      maxconn 4096
-      stats socket /var/run/haproxy.sock mode 600 expose-fd listeners level user
-
-    defaults
-      log     global
-      timeout connect 5000ms
-      timeout client 50000ms
-      timeout server 50000ms
-      option  httplog
-      option  forwardfor
-      option  http-server-close
-      stats   enable
-      stats   auth  admin:admin
-      stats   uri   /haproxyStats
-
-    backend be_challenge_http
-      mode http
-      server node1 127.0.0.1:%d
-
-    backend be_challenge_https
-      mode http
-      server node1 127.0.0.1:%d
-  `, h.certManager.config.AuthPortHTTP, h.certManager.config.AuthPortHTTPS))
-
-  // Compose config
-  contents := globals + "\n" + httpFrontend + "\n"
-  if useSSL {
-    contents += httpsFrontend + "\n"
+  // Compose final config
+  config := []string{
+    "global",
+    "  log stdout local0 info",
+    "  maxconn 4096",
+    "  tune.ssl.default-dh-param 2048",
+    "  stats socket /var/run/haproxy.sock mode 600 expose-fd listeners level user",
+    "",
+    "defaults",
+    "  log     global",
+    "  timeout client          25s",
+    "  timeout connect          5s",
+    "  timeout server          25s",
+    "  timeout tunnel        3600s",
+    "  timeout http-keep-alive  1s",
+    "  timeout http-request    15s",
+    "  timeout queue           30s",
+    "  timeout tarpit          60s",
+    "  option  httplog",
+    "  option  dontlognull",
+    "  option  http-server-close",
+    "  option  forwardfor",
+    "  backlog 10000",
+    "  default-server inter 3s rise 2 fall 3",
+    "  stats   enable",
+    "  stats   auth  haproxy:st@tspassw0rd",
+    "  stats   uri   /__ha_stats",
+    "",
   }
-  contents += backends
+  config = append(config, feHttp...)
+  config = append(config, feBeHttp...)
+  config = append(config, "")
+  config = append(config, feHttps...)
+  config = append(config, feBeHttps...)
+  config = append(config, "")
+  config = append(config, beAll...)
+  config = append(config,
+    "backend be_challenge_http",
+    "  mode http",
+    "  server node1 127.0.0.1:"+strconv.Itoa(h.certManager.GetAuthServicePort(false)),
+    "",
+  )
 
-  log.Infof("Using config: %s", contents)
-
-  return []byte(dedent.Dedent(contents)), nil
+  return []byte(strings.Join(config, "\n")), nil
 }

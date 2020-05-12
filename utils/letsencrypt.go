@@ -28,7 +28,7 @@ func (u *acmeUser) GetPrivateKey() crypto.PrivateKey {
   return u.key
 }
 
-func (p *CertificateProvider) getCertificateLetsEncrypt(domain string) (*Certificate, error) {
+func (p *DefaultCertificateProvider) getCertificateLetsEncrypt(domain string) (*Certificate, error) {
   myUser := acmeUser{
     Email:        p.config.Email,
     Registration: p.userRegistration,

@@ -48,9 +48,14 @@ func main() {
     panic(err)
   }
 
-  sslEmail := os.Getenv("AUTOCERT_EMAIL")
+  sslEmail := os.Getenv("CERT_EMAIL")
   if sslEmail == "" {
     sslEmail = "demo@example.com"
+  }
+
+  sslOrg := os.Getenv("CERT_ORG")
+  if sslOrg == "" {
+    sslOrg = "HAProxy"
   }
 
   certDir := os.Getenv("AUTOCERT_DIR")
@@ -58,13 +63,14 @@ func main() {
     certDir = "/var/lib/docker-lb"
   }
 
-  cfg := utils.CertificateProviderConfig{
+  cfg := utils.DefaultCertificateProviderConfig{
     ConfigDir:     certDir,
     Email:         sslEmail,
+    Organization:  sslOrg,
     AuthPortHTTP:  5002,
     AuthPortHTTPS: 5003,
   }
-  certPovider, err := utils.CreateCertificateProvider(cfg)
+  certPovider, err := utils.CreateDefaultCertificateProvider(cfg)
   if err != nil {
     panic(err)
   }

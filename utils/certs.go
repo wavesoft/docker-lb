@@ -1,6 +1,7 @@
 package utils
 
 import (
+  "crypto"
   "crypto/ecdsa"
   "crypto/elliptic"
   "crypto/rand"
@@ -19,14 +20,28 @@ import (
   "github.com/go-acme/lego/v3/registration"
 )
 
+type DefaultCertificateProviderConfig struct {
+  ConfigDir     string
+  Email         string
+  Organization  string
+  AuthPortHTTP  int
+  AuthPortHTTPS int
+}
+
+type DefaultCertificateProvider struct {
+  config           DefaultCertificateProviderConfig
+  userKey          crypto.PrivateKey
+  userRegistration *registration.Resource
+}
+
 type persistenceFile struct {
   PrivateKey   string                 `json:"private_key"`
   Email        string                 `json:"email"`
   Registration *registration.Resource `json:"registration,omitempty"`
 }
 
-func CreateCertificateProvider(config CertificateProviderConfig) (*CertificateProvider, error) {
-  inst := &CertificateProvider{config, nil, nil}
+func CreateDefaultCertificateProvider(config DefaultCertificateProviderConfig) (*DefaultCertificateProvider, error) {
+  inst := &DefaultCertificateProvider{config, nil, nil}
 
   // Create mssing directories
   if _, err := os.Stat(config.ConfigDir); os.IsNotExist(err) {
@@ -44,7 +59,7 @@ func CreateCertificateProvider(config CertificateProviderConfig) (*CertificatePr
   return inst, nil
 }
 
-func (p *CertificateProvider) loadState() error {
+func (p *DefaultCertificateProvider) loadState() error {
   var (
     stateFilePath string = fmt.Sprintf("%s/state.json", p.config.ConfigDir)
     state         persistenceFile
@@ -87,7 +102,7 @@ func (p *CertificateProvider) loadState() error {
   return nil
 }
 
-func (p *CertificateProvider) saveState() error {
+func (p *DefaultCertificateProvider) saveState() error {
   var (
     stateFilePath string = fmt.Sprintf("%s/state.json", p.config.ConfigDir)
     state         persistenceFile
@@ -115,7 +130,7 @@ func (p *CertificateProvider) saveState() error {
   return nil
 }
 
-func (p *CertificateProvider) generateNewKey() error {
+func (p *DefaultCertificateProvider) generateNewKey() error {
   privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
   if err != nil {
     return fmt.Errorf("Could not generate private key: %s", err.Error())
@@ -125,9 +140,16 @@ func (p *CertificateProvider) generateNewKey() error {
   return p.saveState()
 }
 
-func (p *CertificateProvider) GetDefault(domain string) (string, error) {
+func (p *DefaultCertificateProvider) GetAuthServicePort(ssl bool) int {
+  if ssl {
+    return p.config.AuthPortHTTPS
+  }
+  return p.config.AuthPortHTTP
+}
+
+func (p *DefaultCertificateProvider) GetSelfSigned(domain string) (string, error) {
   var (
-    certFilePath string = fmt.Sprintf("%s/cert/default.pem", p.config.ConfigDir)
+    certFilePath string = fmt.Sprintf("%s/cert/selfsigned-%s.pem", p.config.ConfigDir, domain)
   )
 
   // Crate if missing
@@ -150,7 +172,8 @@ func (p *CertificateProvider) GetDefault(domain string) (string, error) {
     template := x509.Certificate{
       SerialNumber: serialNumber,
       Subject: pkix.Name{
-        Organization: []string{"Acme Co"},
+        Organization: []string{p.config.Organization},
+        CommonName:   domain,
       },
       NotBefore:             notBefore,
       NotAfter:              notAfter,
@@ -191,7 +214,7 @@ func (p *CertificateProvider) GetDefault(domain string) (string, error) {
   return certFilePath, nil
 }
 
-func (p *CertificateProvider) GetCertificateForDomain(domain string) (string, error) {
+func (p *DefaultCertificateProvider) GetCertificateForDomain(domain string) (string, error) {
   var (
     certFilePath string = fmt.Sprintf("%s/cert/%s.pem", p.config.ConfigDir, domain)
   )
