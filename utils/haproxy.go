@@ -15,19 +15,25 @@ import (
   log "github.com/sirupsen/logrus"
 )
 
+type HAProxyManagerConfig struct {
+  Certificates           CertificateProvider
+  BinaryPath             string
+  DefaultLocalServerPort int
+}
+
 type HAProxyManager struct {
-  config      *HAProxyConfig
+  state       *HAProxyState
+  config      HAProxyManagerConfig
   certManager CertificateProvider
-  binPath     string
   cfgPath     string
   proc        *exec.Cmd
 }
 
-func CreateHAProxyManager(binPath string, certManager CertificateProvider) *HAProxyManager {
+func CreateHAProxyManager(config HAProxyManagerConfig) *HAProxyManager {
   return &HAProxyManager{
-    config:      &HAProxyConfig{},
-    certManager: certManager,
-    binPath:     binPath,
+    state:       &HAProxyState{},
+    config:      config,
+    certManager: config.Certificates,
     cfgPath:     "/tmp/haproxy.conf",
     proc:        nil,
   }
@@ -57,7 +63,7 @@ func (h *HAProxyManager) Start() error {
   }
 
   log.Infof("Starting HAProxy")
-  h.proc = exec.Command(h.binPath, "-f", h.cfgPath)
+  h.proc = exec.Command(h.config.BinaryPath, "-f", h.cfgPath)
 
   stdout, err := h.proc.StdoutPipe()
   if err != nil {
@@ -125,8 +131,8 @@ func (h *HAProxyManager) Reload() error {
   return nil
 }
 
-func (h *HAProxyManager) SetConfig(cfg *HAProxyConfig) error {
-  h.config = cfg
+func (h *HAProxyManager) SetState(cfg *HAProxyState) error {
+  h.state = cfg
   return h.Reload()
 }
 
@@ -232,8 +238,8 @@ func (h *HAProxyManager) computeConfig() ([]byte, error) {
     beAll     []string
   )
 
-  // Create the mapping tables
-  for _, e := range h.config.Endpoints {
+  // Map the endpoint state to frontends + backends
+  for _, e := range h.state.Endpoints {
     be := getBackend(&backends, &e)
 
     // Add the non-SSL front-end
@@ -266,7 +272,7 @@ func (h *HAProxyManager) computeConfig() ([]byte, error) {
   )
   for _, fe := range frontends {
     if fe.SSL {
-      certPath, err := h.certManager.GetCertificateForDomain(fe.Domain)
+      certPath, err := h.config.Certificates.GetCertificateForDomain(fe.Domain)
       if err != nil {
         return nil, err
       }
@@ -277,7 +283,7 @@ func (h *HAProxyManager) computeConfig() ([]byte, error) {
   // Make sure we have a self-signed fallback certificates if there are no
   // certificates defined
   if len(feCerts) == 0 {
-    certPath, err := h.certManager.GetSelfSigned("")
+    certPath, err := h.config.Certificates.GetSelfSigned("")
     if err != nil {
       return nil, err
     }
@@ -364,6 +370,27 @@ func (h *HAProxyManager) computeConfig() ([]byte, error) {
     beAll = append(beAll, "")
   }
 
+  // Add a local server if enabled
+  if h.config.DefaultLocalServerPort != 0 {
+    // Setup backend
+    beAll = append(beAll,
+      "backend be_local",
+      "  mode http",
+      "  option httpclose",
+      "  option forwardfor",
+      fmt.Sprintf("  server node1 127.0.0.1:%d", h.config.DefaultLocalServerPort),
+    )
+    beAll = append(beAll, "")
+
+    // Setup default sink front-end
+    feBeHttp = append(feBeHttp,
+      "  use_backend be_local",
+    )
+    feBeHttps = append(feBeHttps,
+      "  use_backend be_local",
+    )
+  }
+
   // Compose final config
   config := []string{
     "global",
@@ -403,7 +430,7 @@ func (h *HAProxyManager) computeConfig() ([]byte, error) {
   config = append(config,
     "backend be_challenge_http",
     "  mode http",
-    "  server node1 127.0.0.1:"+strconv.Itoa(h.certManager.GetAuthServicePort(false)),
+    "  server node1 127.0.0.1:"+strconv.Itoa(h.config.Certificates.GetAuthServicePort(false)),
     "",
   )
 

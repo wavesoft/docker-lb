@@ -1,6 +1,8 @@
 package main
 
 import (
+  "fmt"
+  "net/http"
   "os"
   "time"
 
@@ -8,7 +10,13 @@ import (
   "github.com/wavesoft/docker-lb/utils"
 )
 
-func syncThread(docker *utils.DockerMonitor, haproxy *utils.HAProxyManager) {
+func httpServerThread(staticDir string, listenPort int) {
+  log.Infof("Serving static files from %s", staticDir)
+  http.Handle("/", http.FileServer(http.Dir(staticDir)))
+  http.ListenAndServe(fmt.Sprintf(":%d", listenPort), nil)
+}
+
+func dockerSyncThread(docker *utils.DockerMonitor, haproxy *utils.HAProxyManager) {
   var (
     crc  uint64 = 0
     ncrc uint64 = 0
@@ -28,9 +36,7 @@ func syncThread(docker *utils.DockerMonitor, haproxy *utils.HAProxyManager) {
       if ncrc != crc {
         crc = ncrc
         log.Infof("Endpoint configuration changed")
-        err = haproxy.SetConfig(&utils.HAProxyConfig{
-          eps,
-        })
+        err = haproxy.SetState(&utils.HAProxyState{eps})
 
         if err != nil {
           log.Errorf("Could not apply configuration: %s", err.Error())
@@ -48,21 +54,24 @@ func main() {
     panic(err)
   }
 
-  sslEmail := os.Getenv("CERT_EMAIL")
+  sslEmail := os.Getenv("AUTOCERT_EMAIL")
   if sslEmail == "" {
     sslEmail = "demo@example.com"
   }
 
-  sslOrg := os.Getenv("CERT_ORG")
+  sslOrg := os.Getenv("AUTOCERT_ORGANISATION")
   if sslOrg == "" {
     sslOrg = "HAProxy"
   }
 
-  certDir := os.Getenv("AUTOCERT_DIR")
+  certDir := os.Getenv("CONFIG_DIR")
   if certDir == "" {
     certDir = "/var/lib/docker-lb"
   }
 
+  wwwDir := os.Getenv("STATIC_WWW_DIR")
+
+  // Configure Certificate Manager
   cfg := utils.DefaultCertificateProviderConfig{
     ConfigDir:     certDir,
     Email:         sslEmail,
@@ -75,14 +84,28 @@ func main() {
     panic(err)
   }
 
-  proxy := utils.CreateHAProxyManager("/usr/local/sbin/haproxy", certPovider)
+  // Configure HAProxy Manager
+  haCfg := utils.HAProxyManagerConfig{
+    Certificates:           certPovider,
+    BinaryPath:             "/usr/local/sbin/haproxy",
+    DefaultLocalServerPort: 0,
+  }
+  if wwwDir != "" {
+    haCfg.DefaultLocalServerPort = 8080
+  }
+  proxy := utils.CreateHAProxyManager(haCfg)
   err = proxy.Start()
   if err != nil {
     panic(err)
   }
 
   // Start monitor thread
-  go syncThread(docker, proxy)
+  go dockerSyncThread(docker, proxy)
+
+  // Start default web thread, if enabled
+  if wwwDir != "" {
+    go httpServerThread(wwwDir, 8080)
+  }
 
   // Wait forever
   select {}

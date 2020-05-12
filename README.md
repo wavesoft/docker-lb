@@ -11,6 +11,7 @@ Deploy Docker-LB to your public-facing node(s):
 docker run -d --name docker-lb \
     -p 80:80 -p 443:443 \
     -e AUTOCERT_EMAIL=admin@mydomain.com \
+    -e AUTOCERT_ORGANISATION="My Company" \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /var/run/docker-lb:/var/run/docker-lb \
     wavesoft/docker-lb:latest

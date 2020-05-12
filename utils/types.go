@@ -29,7 +29,7 @@ type ProxyEndpoint struct {
   SSLAutoCert    bool   `json:"ssl_autocert"`
 }
 
-type HAProxyConfig struct {
+type HAProxyState struct {
   Endpoints []ProxyEndpoint
 }
 

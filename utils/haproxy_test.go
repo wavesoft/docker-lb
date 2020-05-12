@@ -20,8 +20,14 @@ func (p *TestCertificateProvider) GetAuthServicePort(ssl bool) int {
 }
 
 func TestTemplateCreation(t *testing.T) {
-	mgr := CreateHAProxyManager("", &TestCertificateProvider{})
-	mgr.config = &HAProxyConfig{
+	haCfg := HAProxyManagerConfig{
+		Certificates:           &TestCertificateProvider{},
+		BinaryPath:             "/usr/local/sbin/haproxy",
+		DefaultLocalServerPort: 8080,
+	}
+
+	mgr := CreateHAProxyManager(haCfg)
+	mgr.state = &HAProxyState{
 		Endpoints: []ProxyEndpoint{
 			ProxyEndpoint{
 				FrontendDomain: "foo.com",
