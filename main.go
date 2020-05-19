@@ -48,6 +48,33 @@ func dockerSyncThread(docker *utils.DockerMonitor, haproxy *utils.HAProxyManager
   }
 }
 
+func certificateRenewalThread(certs utils.CertificateProvider, haproxy *utils.HAProxyManager) {
+  log.Info("Starting certificate renewal thread")
+  for {
+    time.Sleep(60 * time.Minute)
+    log.Info("Checking for expired certificates")
+
+    reload := false
+    for _, domain := range certs.GetDomainsToReissue() {
+      log.Infof("Certificate for domain %s is about to expire", domain)
+      _, err := certs.GetCertificateForDomain(domain)
+      if err != nil {
+        log.Errorf("Error renewing certificate: %s", err)
+      } else {
+        reload = true
+      }
+    }
+
+    if reload {
+      log.Infof("Certificate(s) have been changed, going to reload")
+      err := haproxy.Reload()
+      if err != nil {
+        log.Errorf("Error reloading HAProxy: %s", err)
+      }
+    }
+  }
+}
+
 func main() {
   docker, err := utils.CreateDockerMonitor()
   if err != nil {
@@ -69,6 +96,11 @@ func main() {
     certDir = "/var/lib/docker-lb"
   }
 
+  haproxyBin := os.Getenv("HAPROXY_BIN")
+  if haproxyBin == "" {
+    haproxyBin = "/usr/local/sbin/haproxy"
+  }
+
   wwwDir := os.Getenv("STATIC_WWW_DIR")
 
   // Configure Certificate Manager
@@ -87,7 +119,7 @@ func main() {
   // Configure HAProxy Manager
   haCfg := utils.HAProxyManagerConfig{
     Certificates:           certPovider,
-    BinaryPath:             "/usr/local/sbin/haproxy",
+    BinaryPath:             haproxyBin,
     DefaultLocalServerPort: 0,
   }
   if wwwDir != "" {
@@ -101,6 +133,9 @@ func main() {
 
   // Start monitor thread
   go dockerSyncThread(docker, proxy)
+
+  // Start certificate renewal thread
+  go certificateRenewalThread(certPovider, proxy)
 
   // Start default web thread, if enabled
   if wwwDir != "" {

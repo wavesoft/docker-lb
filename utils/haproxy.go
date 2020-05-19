@@ -40,7 +40,7 @@ func CreateHAProxyManager(config HAProxyManagerConfig) *HAProxyManager {
 }
 
 func (h *HAProxyManager) haMonitor() {
-  for h.proc != nil {
+  for h.proc != nil && h.proc.Process != nil {
     err := h.proc.Process.Signal(syscall.Signal(0))
     if err != nil {
       log.Warnf("HAProxy has died. Restarting")

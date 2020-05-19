@@ -8,6 +8,7 @@ type CertificateProvider interface {
   GetSelfSigned(domain string) (string, error)
   GetCertificateForDomain(domain string) (string, error)
   GetAuthServicePort(ssl bool) int
+  GetDomainsToReissue() []string
 }
 
 type Certificate struct {

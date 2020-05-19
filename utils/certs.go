@@ -18,6 +18,7 @@ import (
   "time"
 
   "github.com/go-acme/lego/v3/registration"
+  log "github.com/sirupsen/logrus"
 )
 
 type DefaultCertificateProviderConfig struct {
@@ -32,16 +33,24 @@ type DefaultCertificateProvider struct {
   config           DefaultCertificateProviderConfig
   userKey          crypto.PrivateKey
   userRegistration *registration.Resource
+  certificates     map[string]*issuedCertificate
+}
+
+type issuedCertificate struct {
+  IssueDate   time.Time `json:"issue_date"`
+  ExpireDate  time.Time `json:"expire_date"`
+  ReissueDate time.Time `json:"reissue_date"`
 }
 
 type persistenceFile struct {
-  PrivateKey   string                 `json:"private_key"`
-  Email        string                 `json:"email"`
-  Registration *registration.Resource `json:"registration,omitempty"`
+  PrivateKey   string                        `json:"private_key"`
+  Email        string                        `json:"email"`
+  Registration *registration.Resource        `json:"registration,omitempty"`
+  Certificates map[string]*issuedCertificate `json:"certificates"`
 }
 
 func CreateDefaultCertificateProvider(config DefaultCertificateProviderConfig) (*DefaultCertificateProvider, error) {
-  inst := &DefaultCertificateProvider{config, nil, nil}
+  inst := &DefaultCertificateProvider{config, nil, nil, nil}
 
   // Create mssing directories
   if _, err := os.Stat(config.ConfigDir); os.IsNotExist(err) {
@@ -56,6 +65,7 @@ func CreateDefaultCertificateProvider(config DefaultCertificateProviderConfig) (
   if err != nil {
     return nil, err
   }
+
   return inst, nil
 }
 
@@ -98,6 +108,7 @@ func (p *DefaultCertificateProvider) loadState() error {
 
   p.userKey = key
   p.userRegistration = state.Registration
+  p.certificates = state.Certificates
 
   return nil
 }
@@ -110,6 +121,7 @@ func (p *DefaultCertificateProvider) saveState() error {
 
   state.Email = p.config.Email
   state.Registration = p.userRegistration
+  state.Certificates = p.certificates
 
   pKey, err := x509.MarshalECPrivateKey(p.userKey.(*ecdsa.PrivateKey))
   if err != nil {
@@ -138,6 +150,18 @@ func (p *DefaultCertificateProvider) generateNewKey() error {
 
   p.userKey = privateKey
   return p.saveState()
+}
+
+func (p *DefaultCertificateProvider) GetDomainsToReissue() []string {
+  var domains []string = nil
+
+  for domain, cert := range p.certificates {
+    if time.Now().After(cert.ReissueDate) {
+      domains = append(domains, domain)
+    }
+  }
+
+  return domains
 }
 
 func (p *DefaultCertificateProvider) GetAuthServicePort(ssl bool) int {
@@ -217,10 +241,28 @@ func (p *DefaultCertificateProvider) GetSelfSigned(domain string) (string, error
 func (p *DefaultCertificateProvider) GetCertificateForDomain(domain string) (string, error) {
   var (
     certFilePath string = fmt.Sprintf("%s/cert/%s.pem", p.config.ConfigDir, domain)
+    isValid      bool   = true
   )
 
-  // Crate if missing
+  // Check validity
   if _, err := os.Stat(certFilePath); os.IsNotExist(err) {
+    log.Warnf("Certificate for domain %s is missing, going to re-issue", domain)
+    isValid = false
+  }
+  if isValid {
+    if cert, ok := p.certificates[domain]; ok {
+      if time.Now().After(cert.ReissueDate) {
+        isValid = false
+        log.Warnf("Certificate for domain %s reached re-issue timestamp, re-issuing now", domain)
+      }
+    } else {
+      isValid = false
+      log.Warnf("Certificate timestamp for domain %s is missing, going to re-issue", domain)
+    }
+  }
+
+  // Crate if missing
+  if !isValid {
     cert, err := p.getCertificateLetsEncrypt(domain)
     if err != nil {
       return "", fmt.Errorf("Could not create cert for %s: %s", domain, err.Error())
@@ -229,6 +271,18 @@ func (p *DefaultCertificateProvider) GetCertificateForDomain(domain string) (str
     err = cert.WriteTo(certFilePath)
     if err != nil {
       return "", fmt.Errorf("Could not write cert for %s: %s", domain, err.Error())
+    }
+
+    // Let's encrypt issues 90-day certificates, so cache this result for
+    // future certificate re-issuing
+    p.certificates[domain] = &issuedCertificate{
+      IssueDate:   time.Now(),
+      ExpireDate:  time.Now().Add(90 * 24 * time.Hour),
+      ReissueDate: time.Now().Add(75 * 24 * time.Hour), // Leave 15 days to manually fix
+    }
+    err = p.saveState()
+    if err != nil {
+      return "", fmt.Errorf("Could not save state: %s", err.Error())
     }
   }
 
