@@ -14,4 +14,4 @@ jobs:
     - name: Build the Docker image
       run: make docker
     - name: Publish the Docker image
-      run: make push
+      run: docker login --username wavsoft --password ${{secrets.DOCKERHUB_TOKEN}} && make push
