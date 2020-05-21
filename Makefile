@@ -1,4 +1,4 @@
-VERSION := $(shell git describe --tags)
+VERSION := $(shell git rev-parse --short HEAD)
 IMAGE_NAME = "wavesoft/docker-lb"
 
 .PHONY: build
