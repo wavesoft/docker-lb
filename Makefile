@@ -1,9 +1,9 @@
 VERSION := $(shell git rev-parse --short HEAD)
 IMAGE_NAME = "wavesoft/docker-lb"
 
-.PHONY: build
+.PHONY: docker push
 
-build:
+docker:
 	docker build \
 		-t $(IMAGE_NAME):$(VERSION) \
 		-t $(IMAGE_NAME):latest \
