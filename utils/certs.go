@@ -15,6 +15,7 @@ import (
   "io/ioutil"
   "math/big"
   "os"
+  "strings"
   "time"
 
   "github.com/go-acme/lego/v3/registration"
@@ -73,10 +74,12 @@ func (p *DefaultCertificateProvider) loadState() error {
   var (
     stateFilePath string = fmt.Sprintf("%s/state.json", p.config.ConfigDir)
     state         persistenceFile
+    certNames     []string = nil
   )
 
   // If we are missing persistence, generate new key
   if _, err := os.Stat(stateFilePath); os.IsNotExist(err) {
+    log.Warnf("State file %s is missing, assuming new installation", stateFilePath)
     return p.generateNewKey()
   }
 
@@ -109,6 +112,14 @@ func (p *DefaultCertificateProvider) loadState() error {
   p.userKey = key
   p.userRegistration = state.Registration
   p.certificates = state.Certificates
+
+  for domain, _ := range p.certificates {
+    certNames = append(certNames, domain)
+  }
+
+  log.Infof("Recovered state from %s (Known certificates: %s)",
+    stateFilePath, strings.Join(certNames, ", "),
+  )
 
   return nil
 }
