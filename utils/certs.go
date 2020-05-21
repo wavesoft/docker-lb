@@ -50,7 +50,7 @@ type persistenceFile struct {
 }
 
 func CreateDefaultCertificateProvider(config DefaultCertificateProviderConfig) (*DefaultCertificateProvider, error) {
-  inst := &DefaultCertificateProvider{config, nil, nil, nil}
+  inst := &DefaultCertificateProvider{config, nil, nil, make(map[string]*issuedCertificate)}
 
   // Create mssing directories
   if _, err := os.Stat(config.ConfigDir); os.IsNotExist(err) {
