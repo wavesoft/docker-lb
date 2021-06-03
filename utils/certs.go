@@ -113,7 +113,7 @@ func (p *DefaultCertificateProvider) loadState() error {
 	p.userRegistration = state.Registration
 	p.certificates = state.Certificates
 
-	for domain, _ := range p.certificates {
+	for domain := range p.certificates {
 		certNames = append(certNames, domain)
 	}
 

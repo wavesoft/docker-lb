@@ -319,6 +319,8 @@ func (h *HAProxyManager) computeConfig() ([]byte, error) {
 			aclList := make([]string, len(aclCommon))
 			copy(aclList, aclCommon)
 
+			log.Infof("Mapping [#%d] Backend 'be%d' for path '%s'", m.Backend.Order, m.Backend.Index, m.Path)
+
 			// Add path-specific acl
 			if m.Path != "/" {
 				aclName := fmt.Sprintf("host_fe%d_url%d", fi, mi)

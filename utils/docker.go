@@ -81,7 +81,7 @@ func (m *DockerMonitor) GetProxyEndpoints() ([]ProxyEndpoint, error) {
 
 			if container.NetworkSettings != nil {
 				for _, netInfo := range container.NetworkSettings.Networks {
-					log.Infof("[c-%s] Exposing %s:%d%s -> %s%s ", cid,
+					log.Debugf("[c-%s] Exposing %s:%d%s -> %s%s ", cid,
 						netInfo.IPAddress, port, pathFrom, domain, pathTo)
 					ep = append(ep, ProxyEndpoint{
 						FrontendDomain: domain,
