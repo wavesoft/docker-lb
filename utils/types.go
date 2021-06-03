@@ -28,6 +28,7 @@ type ProxyEndpoint struct {
 	BackendPort    int    `json:"backend_port"`
 	BackendPath    string `json:"backend_path"`
 	SSLAutoCert    bool   `json:"ssl_autocert"`
+	Order          int    `json:"order"`
 }
 
 type HAProxyState struct {

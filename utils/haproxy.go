@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -146,29 +147,6 @@ func (h *HAProxyManager) writeConfig() error {
 	return ioutil.WriteFile(h.cfgPath, contents, 0600)
 }
 
-type HAPBackendRecord struct {
-	Index int
-	Port  int
-	Host  string
-
-	// Needed for URL rewriting
-	PathBe string
-	PathFe string
-}
-
-type HAPMappingRecord struct {
-	Index   int
-	Path    string
-	Backend *HAPBackendRecord
-}
-
-type HAPFrontendRecord struct {
-	Index   int
-	Domain  string
-	SSL     bool
-	Mapping []*HAPMappingRecord
-}
-
 func normalizePath(p string) string {
 	// Black paths map always to root path
 	if p == "" || p == "/" {
@@ -190,12 +168,23 @@ func getBackend(list *[]*HAPBackendRecord, ep *ProxyEndpoint) *HAPBackendRecord 
 		}
 	}
 
+	var order int
+	if ep.Order != -1 {
+		order = ep.Order
+	} else {
+		// Unless explicitly overriden, the order the backends are processed depends
+		// on the length of the path. Shorter paths get lower the order.
+		pathLen := len(ep.FrontendPath)
+		order = 500 - pathLen
+	}
+
 	rec := &HAPBackendRecord{
 		Index:  len(*list) + 1,
 		Host:   ep.BackendIP,
 		Port:   ep.BackendPort,
 		PathBe: normalizePath(ep.BackendPath),
 		PathFe: normalizePath(ep.FrontendPath),
+		Order:  order,
 	}
 	*list = append(*list, rec)
 	return rec
@@ -321,6 +310,9 @@ func (h *HAProxyManager) computeConfig() ([]byte, error) {
 				fmt.Sprintf("  acl %s req.hdr(Host),regsub(:[0-9]+$,) -i %s", aclName, fe.Domain),
 			)
 		}
+
+		// Sort the mapping records by order
+		sort.Sort(byOrder(fe.Mapping))
 
 		// Process backend maps
 		for mi, m := range fe.Mapping {

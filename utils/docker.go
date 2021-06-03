@@ -71,6 +71,14 @@ func (m *DockerMonitor) GetProxyEndpoints() ([]ProxyEndpoint, error) {
 				}
 			}
 
+			// Get order flag
+			order := -1
+			if sv, ok := container.Labels["publish.order"]; ok {
+				if v, err := strconv.Atoi(sv); err != nil {
+					order = v
+				}
+			}
+
 			if container.NetworkSettings != nil {
 				for _, netInfo := range container.NetworkSettings.Networks {
 					log.Infof("[c-%s] Exposing %s:%d%s -> %s%s ", cid,
@@ -82,6 +90,7 @@ func (m *DockerMonitor) GetProxyEndpoints() ([]ProxyEndpoint, error) {
 						BackendPort:    port,
 						BackendPath:    pathTo,
 						SSLAutoCert:    autoCert,
+						Order:          order,
 					})
 				}
 			}
