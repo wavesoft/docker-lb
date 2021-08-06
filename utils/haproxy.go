@@ -345,13 +345,13 @@ func (h *HAProxyManager) computeConfig() ([]byte, error) {
 	}
 
 	// Process backend records
-	for _, be := range backends {
+	for idx, be := range backends {
 		beAll = append(beAll,
 			fmt.Sprintf("backend be%d", be.Index),
 			"  mode http",
 			"  option httpclose",
 			"  option forwardfor",
-			fmt.Sprintf("  server node1 %s:%d", be.Host, be.Port),
+			fmt.Sprintf("  server service%d %s:%d", idx, be.Host, be.Port),
 		)
 
 		// Add rewrite rule if paths mismatch
@@ -372,7 +372,7 @@ func (h *HAProxyManager) computeConfig() ([]byte, error) {
 			"  mode http",
 			"  option httpclose",
 			"  option forwardfor",
-			fmt.Sprintf("  server node1 127.0.0.1:%d", h.config.DefaultLocalServerPort),
+			fmt.Sprintf("  server local0 127.0.0.1:%d", h.config.DefaultLocalServerPort),
 		)
 		beAll = append(beAll, "")
 
@@ -424,7 +424,7 @@ func (h *HAProxyManager) computeConfig() ([]byte, error) {
 	config = append(config,
 		"backend be_challenge_http",
 		"  mode http",
-		"  server node1 127.0.0.1:"+strconv.Itoa(h.config.Certificates.GetAuthServicePort(false)),
+		"  server local1 127.0.0.1:"+strconv.Itoa(h.config.Certificates.GetAuthServicePort(false)),
 		"",
 	)
 
